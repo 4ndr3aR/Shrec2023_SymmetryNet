@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 from lightning.pytorch.cli import LightningCLI
 from src.dataset.shrec2023 import SymmetryDataModule
 from src.model.center_n_normals_net import LightingCenterNNormalsNet

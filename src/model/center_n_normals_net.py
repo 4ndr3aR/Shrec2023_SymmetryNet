@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from typing import Callable
 
 import lightning
@@ -14,7 +15,6 @@ from src.model.encoders.pointnet_encoder import PointNetEncoder
 from src.model.losses.discrete_prediction_loss import calculate_loss
 from src.model.losses.utils import calculate_cost_matrix_normals
 from src.model.postprocessing.utils import reverse_transformation
-
 
 class CenterNNormalsNet(nn.Module):
     def __init__(
@@ -188,7 +188,8 @@ if __name__ == "__main__":
                                        default_symmetry_dataset_collate_fn_list_sym)
     from src.dataset.preprocessing import *
 
-    DATA_PATH = "/data/shrec_2023/benchmark-train"
+    #DATA_PATH = "/data/shrec_2023/benchmark-train"
+    DATA_PATH = "/mnt/btrfs-big/dataset/geometric-primitives-classification/shrec-2023/benchmark-train"
     BATCH_SIZE = 1
     EXAMPLES_USED = 10
     SAMPLE_SIZE = 1024

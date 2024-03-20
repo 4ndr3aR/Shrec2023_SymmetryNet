@@ -32,7 +32,8 @@ class SymmetryDataset(Dataset):
             self,
             data_source_path: str = "path/to/dataset",
             transform: Optional[Shrec2023Transform] = None,
-            has_ground_truth: bool = True
+            has_ground_truth: bool = True,
+            npz_files: bool = False
     ):
         """
         Dataset used for a track of SHREC2023. It contains a set of 3D points
@@ -44,6 +45,9 @@ class SymmetryDataset(Dataset):
         self.transform = transform
         self.length = len(os.listdir(self.data_source_path)) // 2
         self.has_ground_truth = has_ground_truth
+        self.npz_files = npz_files
+        print(f'{self.npz_files = }')
+        print(f'{self.data_source_path = }')
 
     def read_points(self, idx: int) -> torch.Tensor:
         """
@@ -51,9 +55,21 @@ class SymmetryDataset(Dataset):
         :param idx: Index of points to be read.
         :return: A tensor of shape N x 3 where N is the amount of points.
         """
-        points = torch.tensor(
-            np.loadtxt(os.path.join(self.data_source_path, f"points{idx}.txt"))
-        )
+        if not self.npz_files:
+            points = torch.tensor(
+                np.loadtxt(os.path.join(self.data_source_path, f"points{idx}.txt"))
+            )
+        else:
+            points = torch.tensor(
+                np.load(os.path.join(self.data_source_path, f"points{idx}.npz"))['points']
+            )
+        '''
+        fd = np.load(os.path.join(self.data_source_path, f"points{idx}.npz"))
+        print(f'{type(fd) = }')
+        points = fd['points']
+        print(f'{type(points) = }')
+        print(f'{points.shape = }')
+        '''
         return points
 
     def read_planes(self, idx: int) -> torch.Tensor:
@@ -67,7 +83,17 @@ class SymmetryDataset(Dataset):
         """
         with open(os.path.join(self.data_source_path, f"points{idx}_sym.txt")) as f:
             n_planes = int(f.readline().strip())
-            sym_planes = torch.tensor(np.loadtxt(f))
+            if not self.npz_files:
+                sym_planes = torch.tensor(np.loadtxt(f))
+            else:
+                sym_planes = torch.tensor(np.loadtxt(f, usecols=[i for i in range(1,7)]))
+                '''
+                print(f'{sym_planes = }')
+                print(f'{sym_planes[:, 0:3] = }')
+                print(f'{sym_planes[:, 3:6] = }')
+                '''
+                sym_planes = torch.cat((sym_planes[:, 3:6], sym_planes[:, 0:3]), axis=1)
+                #print(f'{sym_planes = }')
         if n_planes == 1:
             sym_planes = sym_planes.unsqueeze(0)
         return sym_planes
@@ -78,12 +104,15 @@ class SymmetryDataset(Dataset):
     def __getitem__(self, idx: int) -> (int, torch.Tensor, Optional[torch.Tensor], List[Shrec2023Transform]):
         points = self.read_points(idx)
         planes = None
+        #print(f'[{idx}] Reading GT of: {self.data_source_path}')
 
         if self.has_ground_truth:
             planes = self.read_planes(idx)
+            #print(f'[{idx}] Planes: {planes}')
 
         if self.transform is not None:
             idx, points, planes = self.transform(idx, points, planes)
+            #print(f'[{idx}] {points = } - {planes = }')
 
         transform_used = copy.deepcopy(self.transform)
         return idx, points.float(), planes.float(), transform_used
@@ -108,6 +137,7 @@ class SymmetryDataModule(lightning.LightningDataModule):
             validation_percentage: float = 0.1,
             shuffle: bool = True,
             n_workers: int = 1,
+            npz_files: bool = False,
     ):
         """
         Data module designed to load Shrec2023 symmetry dataset.
@@ -122,6 +152,7 @@ class SymmetryDataModule(lightning.LightningDataModule):
         :param validation_percentage: Percentage used for validation data.
         :param shuffle: True if you want to shuffle the train dataloader every epoch.
         :param n_workers: Amount of workers used for loading data into RAM.
+        :param npz_files: True if you want to use npz files instead of txt files.
         """
         super().__init__()
         self.train_data_path = train_data_path
@@ -134,13 +165,15 @@ class SymmetryDataModule(lightning.LightningDataModule):
         self.validation_percentage = validation_percentage
         self.shuffle = shuffle
         self.n_workers = n_workers
+        self.npz_files = npz_files
 
     def setup(self, stage: str):
         if stage == "fit":
             dataset_full = SymmetryDataset(
                 data_source_path=self.train_data_path,
                 transform=self.transform,
-                has_ground_truth=True
+                has_ground_truth=True,
+                npz_files=self.npz_files
             )
 
             proportions = [1 - self.validation_percentage, self.validation_percentage]
@@ -155,14 +188,16 @@ class SymmetryDataModule(lightning.LightningDataModule):
             self.test_dataset = SymmetryDataset(
                 data_source_path=self.test_data_path,
                 transform=self.transform,
-                has_ground_truth=True
+                has_ground_truth=True,
+                npz_files=self.npz_files
             )
 
         if stage == "predict":
             self.predict_dataset = SymmetryDataset(
                 data_source_path=self.predict_data_path,
                 transform=self.transform,
-                has_ground_truth=self.does_predict_has_ground_truths
+                has_ground_truth=self.does_predict_has_ground_truths,
+                npz_files=self.npz_files
             )
 
     def train_dataloader(self):
