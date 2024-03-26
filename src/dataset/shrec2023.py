@@ -1,5 +1,8 @@
 import copy
 import os
+
+from pathlib import Path
+
 from typing import Optional, Callable, Tuple, List
 
 import lightning
@@ -33,7 +36,9 @@ class SymmetryDataset(Dataset):
             data_source_path: str = "path/to/dataset",
             transform: Optional[Shrec2023Transform] = None,
             has_ground_truth: bool = True,
-            npz_files: bool = False
+            max_points: int = 14400,
+            #max_points: int = 5000,
+            dataset_type: str = 'txt',			# txt or npz or gz or xz (the content also changes with the format)
     ):
         """
         Dataset used for a track of SHREC2023. It contains a set of 3D points
@@ -45,9 +50,41 @@ class SymmetryDataset(Dataset):
         self.transform = transform
         self.length = len(os.listdir(self.data_source_path)) // 2
         self.has_ground_truth = has_ground_truth
-        self.npz_files = npz_files
-        print(f'{self.npz_files = }')
-        print(f'{self.data_source_path = }')
+        self.max_points = max_points
+        self.dataset_type = dataset_type
+        #print(f'{self.data_source_path = }')
+        #print(f'{self.dataset_type = }')
+        self.files = []
+        if self.dataset_type == 'npz':
+            self.files = self.find_npz(self.data_source_path)
+        print(f'Creating a dataset from: {self.data_source_path} (dataset type: {self.dataset_type}) - each shape has {self.max_points} points')
+
+    def find_npz(self, path) -> list:
+        print(f'Looking for npz files in {path}')
+        files = Path(path).glob('*.npz')
+        files = list(files)
+        print(f'Found {len(files)} files')
+        return files
+
+    def downsample_or_upsample(self, points, debug=False) -> torch.Tensor:
+        if self.max_points - points.shape[0] > 0:
+            # Duplicate points
+            sampling_indices = np.random.choice(points.shape[0], self.max_points - points.shape[0])
+            if debug:
+                    print(f'downsample_or_upsample(): {len(sampling_indices) = } - {sampling_indices = }')
+            #print(f'{points.shape = } - {type(points) = } - {points = }')
+            new_points = points[sampling_indices, : ] 
+            points = np.concatenate((points, new_points), axis=0)
+        else:
+            # sample points
+            sampling_indices = np.random.choice(points.shape[0], self.max_points)
+            if debug:
+                print(f'downsample_or_upsample(): {len(sampling_indices) = } - {sampling_indices = }')
+            points = points[sampling_indices, :]
+        if debug:
+            print(f'downsample_or_upsample() returning: {len(points) = } - {points = }')
+
+        return torch.tensor(points)
 
     def read_points(self, idx: int) -> torch.Tensor:
         """
@@ -55,14 +92,28 @@ class SymmetryDataset(Dataset):
         :param idx: Index of points to be read.
         :return: A tensor of shape N x 3 where N is the amount of points.
         """
-        if not self.npz_files:
-            points = torch.tensor(
-                np.loadtxt(os.path.join(self.data_source_path, f"points{idx}.txt"))
-            )
-        else:
+        if self.dataset_type == 'txt':
+            points = torch.tensor(np.loadtxt(os.path.join(self.data_source_path, f"points{idx}.txt")))
+        elif self.dataset_type == 'npz':
+            if self.files and idx < len(self.files) and self.files[idx].is_file():
+                #print(f'{self.files[idx] = }')
+                points = torch.tensor(np.load(self.files[idx])['points'])
+            else:
+                raise FileNotFoundError
+            '''
             points = torch.tensor(
                 np.load(os.path.join(self.data_source_path, f"points{idx}.npz"))['points']
             )
+            '''
+        elif self.dataset_type == 'gz':
+            print(f'TODO: implement me')
+            raise NotImplementedError
+        elif self.dataset_type == 'xz':
+            print(f'TODO: implement me')
+            raise NotImplementedError
+        else:
+            print(f'Error: unknown dataset format...')
+            raise NotImplementedError
         '''
         fd = np.load(os.path.join(self.data_source_path, f"points{idx}.npz"))
         print(f'{type(fd) = }')
@@ -70,6 +121,10 @@ class SymmetryDataset(Dataset):
         print(f'{type(points) = }')
         print(f'{points.shape = }')
         '''
+
+        if self.max_points != points.shape[0]:
+            points = self.downsample_or_upsample(points)
+
         return points
 
     def read_planes(self, idx: int) -> torch.Tensor:
@@ -81,19 +136,35 @@ class SymmetryDataset(Dataset):
         N is the amount of planes and 6 because the first 3 elements
         are the normal and the last 3 are the point.
         """
-        with open(os.path.join(self.data_source_path, f"points{idx}_sym.txt")) as f:
-            n_planes = int(f.readline().strip())
-            if not self.npz_files:
+        if self.dataset_type == 'txt':
+            with open(os.path.join(self.data_source_path, f"points{idx}_sym.txt")) as f:
+                n_planes = int(f.readline().strip())
                 sym_planes = torch.tensor(np.loadtxt(f))
+        elif self.dataset_type == 'npz':
+            if self.files and idx < len(self.files) and self.files[idx].is_file():
+                #points = torch.tensor(np.load(self.files[idx])['points'])
+                gt_fn = str(self.files[idx]).replace('.npz', '-sym.txt')
+                #print(f'{gt_fn = }')
+                with open(gt_fn, 'r') as f:
+                    n_planes = int(f.readline().strip())
+                sym_planes = torch.tensor(np.loadtxt(gt_fn, usecols=[i for i in range(1,7)], skiprows=1))
+                sym_planes = torch.cat((sym_planes[:, 3:6], sym_planes[:, 0:3]), axis=1)			# give the data the right (backward compatible) format
             else:
-                sym_planes = torch.tensor(np.loadtxt(f, usecols=[i for i in range(1,7)]))
-                '''
-                print(f'{sym_planes = }')
-                print(f'{sym_planes[:, 0:3] = }')
-                print(f'{sym_planes[:, 3:6] = }')
-                '''
-                sym_planes = torch.cat((sym_planes[:, 3:6], sym_planes[:, 0:3]), axis=1)
-                #print(f'{sym_planes = }')
+                raise FileNotFoundError
+            '''
+            sym_planes = torch.tensor(np.loadtxt(f, usecols=[i for i in range(1,7)]))
+            sym_planes = torch.cat((sym_planes[:, 3:6], sym_planes[:, 0:3]), axis=1)
+            '''
+        elif self.dataset_type == 'gz':
+            print(f'TODO: implement me')
+            raise NotImplementedError
+        elif self.dataset_type == 'xz':
+            print(f'TODO: implement me')
+            raise NotImplementedError
+        else:
+            print(f'Error: unknown dataset format...')
+            raise NotImplementedError
+
         if n_planes == 1:
             sym_planes = sym_planes.unsqueeze(0)
         return sym_planes
@@ -115,6 +186,7 @@ class SymmetryDataset(Dataset):
             #print(f'[{idx}] {points = } - {planes = }')
 
         transform_used = copy.deepcopy(self.transform)
+        #print(f'{transform_used = }')
         return idx, points.float(), planes.float(), transform_used
 
 
@@ -137,7 +209,7 @@ class SymmetryDataModule(lightning.LightningDataModule):
             validation_percentage: float = 0.1,
             shuffle: bool = True,
             n_workers: int = 1,
-            npz_files: bool = False,
+            dataset_type: str = 'txt',
     ):
         """
         Data module designed to load Shrec2023 symmetry dataset.
@@ -152,7 +224,7 @@ class SymmetryDataModule(lightning.LightningDataModule):
         :param validation_percentage: Percentage used for validation data.
         :param shuffle: True if you want to shuffle the train dataloader every epoch.
         :param n_workers: Amount of workers used for loading data into RAM.
-        :param npz_files: True if you want to use npz files instead of txt files.
+        :param dataset_type: Type of the dataset (can be 'txt', 'npz', 'gz', 'xz')
         """
         super().__init__()
         self.train_data_path = train_data_path
@@ -165,7 +237,7 @@ class SymmetryDataModule(lightning.LightningDataModule):
         self.validation_percentage = validation_percentage
         self.shuffle = shuffle
         self.n_workers = n_workers
-        self.npz_files = npz_files
+        self.dataset_type = dataset_type
 
     def setup(self, stage: str):
         if stage == "fit":
@@ -173,7 +245,7 @@ class SymmetryDataModule(lightning.LightningDataModule):
                 data_source_path=self.train_data_path,
                 transform=self.transform,
                 has_ground_truth=True,
-                npz_files=self.npz_files
+                dataset_type=self.dataset_type
             )
 
             proportions = [1 - self.validation_percentage, self.validation_percentage]
@@ -189,7 +261,7 @@ class SymmetryDataModule(lightning.LightningDataModule):
                 data_source_path=self.test_data_path,
                 transform=self.transform,
                 has_ground_truth=True,
-                npz_files=self.npz_files
+                dataset_type=self.dataset_type
             )
 
         if stage == "predict":
@@ -197,7 +269,7 @@ class SymmetryDataModule(lightning.LightningDataModule):
                 data_source_path=self.predict_data_path,
                 transform=self.transform,
                 has_ground_truth=self.does_predict_has_ground_truths,
-                npz_files=self.npz_files
+                dataset_type=self.dataset_type
             )
 
     def train_dataloader(self):
