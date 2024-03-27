@@ -70,9 +70,9 @@ model:
   print_losses: false
   use_bn: false
 data:
-  train_data_path: /data/gsanteli/shrec_2023/benchmark-train
-  test_data_path: /data/gsanteli/shrec_2023/benchmark-test
-  predict_data_path: /data/gsanteli/shrec_2023/benchmark-test
+  train_data_path: /tmp/ramdrive/benchmark-train
+  test_data_path: /tmp/ramdrive/benchmark-test
+  predict_data_path: /tmp/ramdrive/benchmark-test
   does_predict_has_ground_truths: false
   batch_size: 1
   transform: null

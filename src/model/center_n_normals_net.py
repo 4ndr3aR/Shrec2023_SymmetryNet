@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 from typing import Callable
 
 import lightning
@@ -7,14 +8,27 @@ from lightning.pytorch.callbacks import EarlyStopping
 from torch import nn
 from torch.utils.data import Subset, DataLoader
 
-from src.metrics.mAP import get_mean_average_precision
-from src.metrics.phc import get_phc
-from src.model.decoders.center_prediction_head import CenterPredictionHead
-from src.model.decoders.normal_prediction_head import NormalPredictionHead
-from src.model.encoders.pointnet_encoder import PointNetEncoder
-from src.model.losses.discrete_prediction_loss import calculate_loss
-from src.model.losses.utils import calculate_cost_matrix_normals
-from src.model.postprocessing.utils import reverse_transformation
+if __name__ == "__main__":
+	import sys
+	sys.path.insert(0, '../..')
+	from src.metrics.mAP import get_mean_average_precision
+	from src.metrics.phc import get_phc
+	from src.model.decoders.center_prediction_head import CenterPredictionHead
+	from src.model.decoders.normal_prediction_head import NormalPredictionHead
+	from src.model.encoders.pointnet_encoder import PointNetEncoder
+	from src.model.losses.discrete_prediction_loss import calculate_loss
+	from src.model.losses.utils import calculate_cost_matrix_normals
+	from src.model.postprocessing.utils import reverse_transformation
+else:
+	from src.metrics.mAP import get_mean_average_precision
+	from src.metrics.phc import get_phc
+	from src.model.decoders.center_prediction_head import CenterPredictionHead
+	from src.model.decoders.normal_prediction_head import NormalPredictionHead
+	from src.model.encoders.pointnet_encoder import PointNetEncoder
+	from src.model.losses.discrete_prediction_loss import calculate_loss
+	from src.model.losses.utils import calculate_cost_matrix_normals
+	from src.model.postprocessing.utils import reverse_transformation
+
 
 class CenterNNormalsNet(nn.Module):
     def __init__(
@@ -189,28 +203,32 @@ if __name__ == "__main__":
     from src.dataset.preprocessing import *
 
     #DATA_PATH = "/data/shrec_2023/benchmark-train"
-    DATA_PATH = "/mnt/btrfs-big/dataset/geometric-primitives-classification/shrec-2023/benchmark-train"
-    BATCH_SIZE = 1
+    DATA_PATH = "/tmp/ramdrive/benchmark-train"
+    TEST_PATH = "/tmp/ramdrive/benchmark-test"
+    BATCH_SIZE = 128
     EXAMPLES_USED = 10
     SAMPLE_SIZE = 1024
     COLLATE_FN = default_symmetry_dataset_collate_fn_list_sym
+    NUM_WORKERS = 15
 
     scaler = UnitSphereNormalization()
     sampler = RandomSampler(sample_size=SAMPLE_SIZE, keep_copy=True)
-    compose_transform = ComposeTransform([scaler])
+    #compose_transform = ComposeTransform([scaler])
+    compose_transform = ComposeTransform([scaler, sampler])
 
     dataset = SymmetryDataset(DATA_PATH, compose_transform)
     datamodule = SymmetryDataModule(
         train_data_path=DATA_PATH,
-        test_data_path=DATA_PATH,
-        predict_data_path=DATA_PATH,
+        #val_data_path=DATA_PATH,		# correctly, this must not exist
+        test_data_path=TEST_PATH,
+        predict_data_path=TEST_PATH,
         does_predict_has_ground_truths=True,
         batch_size=BATCH_SIZE,
         transform=compose_transform,
         collate_function=COLLATE_FN,
-        validation_percentage=0.9999,
+        validation_percentage=0.2,
         shuffle=True,
-        n_workers=1,
+        n_workers=NUM_WORKERS,
     )
 
     test_net = LightingCenterNNormalsNet(
@@ -230,11 +248,26 @@ if __name__ == "__main__":
             EarlyStopping("train_loss", patience=10, verbose=True)
         ]
     )
-    predict_dataset = Subset(datamodule.predict_dataset, [i for i in range(1, EXAMPLES_USED)])
-    predict_dataloader = DataLoader(predict_dataset, batch_size=BATCH_SIZE,
-                                    collate_fn=COLLATE_FN)
 
-    trainer.fit(test_net, predict_dataloader)
+
+    #training_dataset = Subset(datamodule.training_dataset, [i for i in range(1, EXAMPLES_USED)])
+    print(f'{len(datamodule.train_dataset) = }')
+    #train_dataloader = DataLoader(datamodule.train_dataset, batch_size=BATCH_SIZE,
+    #                                collate_fn=COLLATE_FN, num_workers=NUM_WORKERS)
+    train_dataloader = datamodule.train_dataloader()
+    print(f'{len(train_dataloader) = }')
+    val_dataloader = datamodule.val_dataloader()
+    print(f'{len(val_dataloader) = }')
+
+    print(f'{len(datamodule.predict_dataset) = }')
+    predict_dataset = Subset(datamodule.predict_dataset, [i for i in range(1, EXAMPLES_USED)])
+    print(f'{len(predict_dataset) = }')
+    predict_dataloader = DataLoader(predict_dataset, batch_size=BATCH_SIZE,
+                                    collate_fn=COLLATE_FN, num_workers=NUM_WORKERS)
+    print(f'{len(predict_dataloader) = }')
+
+    #trainer.fit(test_net, predict_dataloader)
+    trainer.fit(test_net, train_dataloader, val_dataloader)
     predictions = trainer.predict(test_net, predict_dataloader)
 
     batch, y_pred = predictions[0]
