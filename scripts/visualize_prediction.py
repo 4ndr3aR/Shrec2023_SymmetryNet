@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import pathlib
 from argparse import ArgumentParser
 
@@ -5,6 +6,9 @@ import lightning
 import torch
 from lightning import Trainer
 import polyscope as ps
+
+import sys
+sys.path.insert(0, '..')
 
 from src.dataset.preprocessing import ComposeTransform, RandomSampler, UnitSphereNormalization
 from src.metrics.mAP import get_mean_average_precision, get_match_sequence
@@ -103,9 +107,16 @@ if __name__ == "__main__":
     mean_avg_precision = get_mean_average_precision(predictions)
     print(mean_avg_precision)
 
+    torch.set_printoptions  (precision=3)
+    torch.set_printoptions  (sci_mode=False)
+    #np.set_printoptions     (precision=3)
+    #np.set_printoptions     (suppress=True)
+
     (idxs, points, y_true, transforms), y_pred = predictions[0]
-    print(y_pred[0][:, -1])
+    print(f'GT        : {y_true[0].shape}  - {y_true[0]}')
+    print(f'Prediction: {y_pred.shape} - {y_pred[0]}')
     pred_y = y_pred[0][y_pred[0][:, -1] > 0.5]
+    print(f'Prediction: {pred_y.shape} - {pred_y}')
 
     # 548
     match_sequence = get_match_sequence(pred_y, y_true[0], points[0], 0.01, 0.0174533)
