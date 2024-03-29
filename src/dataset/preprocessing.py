@@ -1,7 +1,27 @@
+import os
+import datetime
+from pathlib import Path
+
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
 import torch
+
+def save_tensor_to_file(tensor, name, path=Path('/tmp')):
+    # Get current date and time including milliseconds
+    now = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    
+    # Create file name with current date and time
+    file_name = f"{name}-{now}.pt"
+    
+    # Create full file path
+    file_path = path / file_name
+    
+    # Save tensor to file
+    torch.save(tensor, file_path)
+    
+    print(f"Successfully saved tensor to {file_path}")
+
 
 
 class Shrec2023Transform(ABC):
@@ -49,7 +69,14 @@ class ComposeTransform(Shrec2023Transform):
     def transform(self, idx: int, points: torch.Tensor, symmetries: Optional[torch.Tensor]) -> (
             int, torch.Tensor, torch.Tensor):
         for a_transform in self.transforms:
+            tfm_name = str(type(a_transform)).replace("<class '", '').replace("'>", '').replace("src.dataset.preprocessing.", '')
+            print(f'-----------------------------------------------------------------------------------')
+            print(f'{idx}, {points.shape}, {symmetries.shape} - applying transform: {type(a_transform)}')
+            save_tensor_to_file(points, f'points-{idx}-before-{tfm_name}-{points.shape[0]}', path=Path('/tmp'))
             idx, points, symmetries = a_transform.transform(idx, points, symmetries)
+            print(f'{idx}, {points.shape}, {symmetries.shape} - applied  transform: {type(a_transform)}')
+            save_tensor_to_file(points, f'points-{idx}-after_-{tfm_name}-{points.shape[0]}', path=Path('/tmp'))
+            print(f'+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++')
         return idx, points, symmetries
 
 
@@ -115,6 +142,7 @@ class RandomSampler(Shrec2023Transform):
 
     def transform(self, idx: int, points: torch.Tensor, symmetries: Optional[torch.Tensor]) \
             -> (int, torch.Tensor, torch.Tensor):
+        print(f'Original points shape: {points.shape}')
         if self.keep_copy:
             self.points_copy = points.clone()
         chosen_points = torch.randint(high=points.shape[0], size=(self.sample_size,))
