@@ -107,6 +107,7 @@ if __name__ == "__main__":
     mean_avg_precision = get_mean_average_precision(predictions)
     print(mean_avg_precision)
 
+    torch.set_printoptions  (linewidth=200)
     torch.set_printoptions  (precision=3)
     torch.set_printoptions  (sci_mode=False)
     #np.set_printoptions     (precision=3)
