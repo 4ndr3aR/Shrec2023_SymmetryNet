@@ -19,7 +19,7 @@ def get_sde(points, pred_plane, true_plane, p=2):
     return torch.norm(
         true_plane.reflect_points(points) - pred_plane.reflect_points(points),
         dim=0, p=p
-    ).mean()
+    ).sum() #.mean()
 
 
 def calculate_sde_loss(points, y_pred, y_true):
@@ -36,6 +36,17 @@ def calculate_sde_loss(points, y_pred, y_true):
         loss += get_sde(points, y_pred[i], y_true[i])
     return loss / m
 
+def calculate_mae_loss(y_pred, y_true, show_loss_log=False):
+    if show_loss_log:
+        print(f"y_pred.shape: {y_pred.shape} - y_true.shape: {y_true.shape}")
+        print(f"y_true: {y_true}")
+        print(f"y_pred: {y_pred}")
+    maeloss = torch.nn.L1Loss(reduction='none')
+    loss    = maeloss(y_pred, y_true)
+    if show_loss_log:
+        print(f"Unreduced MAE Loss: {loss.sum().item()}")
+        print(f"          MAE Loss: {loss.mean().item()}")
+    return loss.sum() #.mean()
 
 def calculate_loss_aux(
         points,
@@ -69,7 +80,9 @@ def calculate_loss_aux(
 
     angle_loss = calculate_angle_loss(matched_y_pred[:, 0:6], y_true) * weights[3]
 
-    total_loss = confidence_loss + sde_loss + angle_loss + distance_loss
+    mae_loss = calculate_mae_loss(matched_y_pred[:, 0:6], y_true, show_loss_log=show_loss_log)
+
+    total_loss = confidence_loss + sde_loss + angle_loss + distance_loss + mae_loss
 
     if show_loss_log:
         torch.set_printoptions  (linewidth=200)
@@ -80,6 +93,7 @@ def calculate_loss_aux(
         print(f"sde_loss     : {(sde_loss / total_loss).item():.2f} | {sde_loss.item()}")
         print(f"angle_loss   : {(angle_loss / total_loss).item():.2f} | {angle_loss.item()}")
         print(f"distance_loss: {(distance_loss / total_loss).item():.2f} | {distance_loss.item()}")
+        print(f"mae_loss     : {(mae_loss / total_loss).item():.2f} | {mae_loss.item()}")
 
     return total_loss
 
@@ -129,7 +143,8 @@ def calculate_loss(
             print(f"{[b_idx]} Y_pred: {curr_y_pred}")
             print(f"{[b_idx]} Loss  : {losses[b_idx].item()}")
     #final_loss = loss / bs
-    loss = torch.mean(losses)
+    #loss = torch.mean(losses)
+    loss = torch.sum(losses)
     if show_losses:
         print(f"Final loss: {loss.item()}")
         #print(f"Final loss: {final_loss.item()}")
