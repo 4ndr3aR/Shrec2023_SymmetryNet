@@ -6,7 +6,36 @@ from src.model.losses.utils import get_optimal_assignment, calculate_distance_lo
 from src.utils.plane import SymPlane
 
 
-def get_sde(points, pred_plane, true_plane, p=2):
+def get_sde(points, pred_plane, true_plane, p=2, show_loss_log=False):
+    """ 
+    :param points:
+    :param pred_plane:
+    :param true_plane:
+    :param p:
+    :return:
+    """
+    if show_loss_log:
+        print(f'pred_plane\n{pred_plane}')
+        print(f'true_plane\n{true_plane}')
+    pred_plane = SymPlane.from_tensor(pred_plane)
+    true_plane = SymPlane.from_tensor(true_plane, normalize=True)
+    if show_loss_log:
+        print(f'pred_plane\n{pred_plane}')
+        print(f'true_plane\n{true_plane}')
+    ppr = pred_plane.reflect_points(points)
+    tpr = true_plane.reflect_points(points)
+    if show_loss_log:
+        print(f'{len(ppr) = }')
+        print(f'{len(tpr) = }')
+        print(f'ppr\n{ppr}')
+        print(f'tpr\n{tpr}')
+    loss = torch.norm(tpr - ppr, dim=0, p=p).mean()
+    if show_loss_log:
+        print(f'SDE loss: {loss}')
+    return loss
+
+
+def get_sde2(points, pred_plane, true_plane, p=2):
     """
     :param points:
     :param pred_plane:
@@ -19,10 +48,10 @@ def get_sde(points, pred_plane, true_plane, p=2):
     return torch.norm(
         true_plane.reflect_points(points) - pred_plane.reflect_points(points),
         dim=0, p=p
-    ).sum() #.mean()
+    ).mean()
 
 
-def calculate_sde_loss(points, y_pred, y_true):
+def calculate_sde_loss(points, y_pred, y_true, show_loss_log=False):
     """
 
     :param points:
@@ -33,7 +62,7 @@ def calculate_sde_loss(points, y_pred, y_true):
     m = y_pred.shape[0]
     loss = torch.tensor([0.0], device=y_pred.device)
     for i in range(m):
-        loss += get_sde(points, y_pred[i], y_true[i])
+        loss += get_sde(points, y_pred[i], y_true[i], show_loss_log=show_loss_log)
     return loss / m
 
 def calculate_mae_loss(y_pred, y_true, show_loss_log=False):
@@ -47,6 +76,21 @@ def calculate_mae_loss(y_pred, y_true, show_loss_log=False):
         print(f"Unreduced MAE Loss: {loss.sum().item()}")
         print(f"          MAE Loss: {loss.mean().item()}")
     return loss.sum() #.mean()
+
+def get_dumb_assignment(points, y_pred, y_true, show_loss_log=False):
+	if show_loss_log:
+		print(f'{y_pred.shape = }')		# [27, 7]
+		print(f'{y_true.shape = }')		# [5,  6]
+	c_hat = torch.zeros([y_pred.shape[0]], device=points.device)
+	ones  = torch.ones(y_true.shape[0], device=points.device)
+	c_hat[:y_true.shape[0]] = ones
+	matched_pred = y_pred[:y_true.shape[0], :]
+	if show_loss_log:
+		print(f'{c_hat.shape = }')
+		print(f'{matched_pred.shape = }')
+		print(f'{c_hat = }')
+		print(f'{matched_pred = }')
+	return c_hat, matched_pred
 
 def calculate_loss_aux(
         points,
@@ -71,18 +115,19 @@ def calculate_loss_aux(
     # c_hat : One-Hot M
     # matched_y_pred : K x 7
     c_hat, matched_y_pred = get_optimal_assignment(points, y_pred, y_true, cost_matrix_method)
+    #c_hat, matched_y_pred = get_dumb_assignment(points, y_pred, y_true, show_loss_log=show_loss_log)
 
     confidence_loss = nn.functional.binary_cross_entropy(confidences, c_hat) * weights[0]
 
-    sde_loss = calculate_sde_loss(points, matched_y_pred[:, 0:6], y_true) * weights[1]
+    sde_loss = calculate_sde_loss(points, matched_y_pred[:, 0:6], y_true, show_loss_log=show_loss_log) * weights[1]
 
     distance_loss = calculate_distance_loss(matched_y_pred[:, 0:6], y_true) * weights[2]
 
     angle_loss = calculate_angle_loss(matched_y_pred[:, 0:6], y_true) * weights[3]
 
-    mae_loss = calculate_mae_loss(matched_y_pred[:, 0:6], y_true, show_loss_log=show_loss_log)
+    #mae_loss = calculate_mae_loss(matched_y_pred[:, 0:6], y_true, show_loss_log=show_loss_log)
 
-    total_loss = confidence_loss + sde_loss + angle_loss + distance_loss + mae_loss
+    total_loss = confidence_loss + sde_loss + angle_loss + distance_loss # + mae_loss
 
     if show_loss_log:
         torch.set_printoptions  (linewidth=200)
@@ -93,7 +138,7 @@ def calculate_loss_aux(
         print(f"sde_loss     : {(sde_loss / total_loss).item():.2f} | {sde_loss.item()}")
         print(f"angle_loss   : {(angle_loss / total_loss).item():.2f} | {angle_loss.item()}")
         print(f"distance_loss: {(distance_loss / total_loss).item():.2f} | {distance_loss.item()}")
-        print(f"mae_loss     : {(mae_loss / total_loss).item():.2f} | {mae_loss.item()}")
+        #print(f"mae_loss     : {(mae_loss / total_loss).item():.2f} | {mae_loss.item()}")
 
     return total_loss
 
@@ -143,8 +188,8 @@ def calculate_loss(
             print(f"{[b_idx]} Y_pred: {curr_y_pred}")
             print(f"{[b_idx]} Loss  : {losses[b_idx].item()}")
     #final_loss = loss / bs
-    #loss = torch.mean(losses)
-    loss = torch.sum(losses)
+    loss = torch.mean(losses)
+    #loss = torch.sum(losses)
     if show_losses:
         print(f"Final loss: {loss.item()}")
         #print(f"Final loss: {final_loss.item()}")

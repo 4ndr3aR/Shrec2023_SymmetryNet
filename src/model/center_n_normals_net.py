@@ -4,7 +4,7 @@ from typing import Callable
 
 import lightning
 import torch
-from lightning.pytorch.callbacks import EarlyStopping
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from torch import nn
 from torch.utils.data import Subset, DataLoader
 
@@ -203,18 +203,22 @@ if __name__ == "__main__":
     from src.dataset.preprocessing import *
 
     #DATA_PATH = "/data/shrec_2023/benchmark-train"
-    DATA_PATH = "/tmp/ramdrive/benchmark-train"
-    TEST_PATH = "/tmp/ramdrive/benchmark-test"
-    BATCH_SIZE = 128
+    #DATA_PATH = "/tmp/ramdrive/benchmark-train"
+    DATA_PATH = "/tmp/ramdrive/benchmark-train-14400"
+    #TEST_PATH = "/tmp/ramdrive/benchmark-test"
+    TEST_PATH = "/tmp/ramdrive/benchmark-train-14400"
+    #BATCH_SIZE = 128
+    BATCH_SIZE = 1
     EXAMPLES_USED = 10
-    SAMPLE_SIZE = 1024
+    #SAMPLE_SIZE = 1024
+    SAMPLE_SIZE = 5000
     COLLATE_FN = default_symmetry_dataset_collate_fn_list_sym
     NUM_WORKERS = 15
 
     scaler = UnitSphereNormalization()
     sampler = RandomSampler(sample_size=SAMPLE_SIZE, keep_copy=True)
-    #compose_transform = ComposeTransform([scaler])
-    compose_transform = ComposeTransform([scaler, sampler])
+    compose_transform = ComposeTransform([scaler])
+    #compose_transform = ComposeTransform([scaler, sampler])
 
     dataset = SymmetryDataset(DATA_PATH, compose_transform)
     datamodule = SymmetryDataModule(
@@ -233,7 +237,12 @@ if __name__ == "__main__":
 
     test_net = LightingCenterNNormalsNet(
         27, use_bn=False,
-        print_losses=False)  #
+        print_losses=False)
+
+
+    # Force an error if there is a graph break in the model
+    test_net = torch.compile(test_net, fullgraph=True)
+
     # mpath = "modelos_interesantes/simple_net/version_9/checkpoints/epoch_epoch=30_val_loss=0.47_train_loss=0.47.ckpt"
     # test_net = LightingMyNet.load_from_checkpoint(mpath)
     datamodule.setup("predict")
@@ -245,10 +254,14 @@ if __name__ == "__main__":
         enable_progress_bar=True,
         max_epochs=500,
         callbacks=[
-            EarlyStopping("train_loss", patience=10, verbose=True)
+            EarlyStopping("train_loss", patience=100, mode="min", verbose=True),
+            EarlyStopping("val_loss"  , patience=100, mode="min", verbose=True),
+            ModelCheckpoint(monitor='val_loss'  , save_top_k=10, mode='min', verbose=True, filename='epoch_{epoch}-{train_loss:.3f}-{val_loss:.3f}-{train_MAP:.3f}-{val_MAP:.3f}'),
+            ModelCheckpoint(monitor='train_loss', save_top_k=10, mode='min', verbose=True, filename='epoch_{epoch}-{train_loss:.3f}-{val_loss:.3f}-{train_MAP:.3f}-{val_MAP:.3f}'),
+            ModelCheckpoint(monitor='val_MAP'   , save_top_k=10, mode='max', verbose=True, filename='epoch_{epoch}-{train_loss:.3f}-{val_loss:.3f}-{train_MAP:.3f}-{val_MAP:.3f}'),
+            ModelCheckpoint(monitor='train_MAP' , save_top_k=10, mode='max', verbose=True, filename='epoch_{epoch}-{train_loss:.3f}-{val_loss:.3f}-{train_MAP:.3f}-{val_MAP:.3f}'),
         ]
     )
-
 
     #training_dataset = Subset(datamodule.training_dataset, [i for i in range(1, EXAMPLES_USED)])
     print(f'{len(datamodule.train_dataset) = }')
